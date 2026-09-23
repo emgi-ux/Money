@@ -9,3 +9,4 @@ frontend/dist/
 .DS_Store
 *.db
 .env.local
+*.tsbuildinfo
