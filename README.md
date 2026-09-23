@@ -25,7 +25,7 @@ installs on phones and desktops as a PWA.
 cd backend
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest                         # 34 tests
+pytest                         # 44 tests, all offline
 
 # Frontend (Node 20+)
 cd ../frontend
@@ -41,6 +41,7 @@ Useful variations:
 
 ```bash
 MONEY_PROVIDER=yahoo money serve       # live Yahoo Finance data (personal use)
+MONEY_PROVIDER=fmp FMP_API_KEY=... money serve   # licensed feed for a paid product
 MONEY_BILLING=dev money serve          # paywall on, checkout is simulated (no charge)
 cd frontend && npm run dev             # hot-reload UI on :5173, proxies /api to :8000
 ```
@@ -67,7 +68,8 @@ money risk AAPL=0.3,MSFT=0.3,JNJ=0.4
    runs on Fly.io, Render, Railway or any VPS. Put it behind HTTPS (required for
    PWA install and Stripe) and set `MONEY_PUBLIC_URL`. See `.env.example` for
    every setting.
-5. **App stores (optional).** The PWA already installs from the browser on
+5. **Market data.** Set `MONEY_PROVIDER=fmp` and `FMP_API_KEY` (see below).
+6. **App stores (optional).** The PWA already installs from the browser on
    iOS, Android and desktop. To list in the App Store or Google Play, wrap
    `frontend/dist` with [Capacitor](https://capacitorjs.com). Apple and Google
    generally require their in-app purchase systems (15-30% fee) for digital
@@ -76,10 +78,14 @@ money risk AAPL=0.3,MSFT=0.3,JNJ=0.4
 ## Before you charge money: read this
 
 - **Market data licensing.** Yahoo Finance data (via `yfinance`) is for
-  personal use and may not be redistributed commercially. A paid product needs a
-  licensed feed such as Polygon.io, Tiingo, Financial Modeling Prep or Intrinio.
-  Add a provider by subclassing `DataProvider` in `backend/money/data/`: implement
-  `prices`, `fundamentals`, `statements` and `intraday`.
+  personal use and may not be redistributed commercially. For the paid product,
+  use the built-in **Financial Modeling Prep** provider (`MONEY_PROVIDER=fmp`,
+  `FMP_API_KEY`). Buy the FMP plan that includes the data-display licence for a
+  public app, since redistribution terms differ by plan. The FMP provider derives
+  every ratio from raw statements, so scores mean the same thing on every feed.
+  To add another vendor (Polygon, Tiingo, Intrinio), subclass `DataProvider` in
+  `backend/money/data/` and implement `prices`, `fundamentals`, `statements`
+  and `intraday`.
 - **Copy trading uses paper money on purpose.** Automatically mirroring trades in
   customers' real brokerage accounts generally requires registration as a
   broker-dealer and/or investment adviser (SEC/FINRA in the US, FCA in the UK,
@@ -96,7 +102,7 @@ money risk AAPL=0.3,MSFT=0.3,JNJ=0.4
 
 ```
 backend/money/
-  data/           providers: synthetic (deterministic demo market) · yahoo (disk-cached)
+  data/           providers: synthetic (demo market) · yahoo · fmp (licensed), all disk-cached
   factors.py      metric definitions, price-derived metric panels (no look-ahead)
   scoring.py      winsorize → sector-neutral z-scores → factor scores → composite
   screener.py     filters + ranking            analysis.py  DCF, F-Score, Altman Z, thesis

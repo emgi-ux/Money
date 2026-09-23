@@ -14,7 +14,7 @@ __all__ = ["DataProvider", "Fundamentals", "SyntheticProvider", "get_provider"]
 
 @lru_cache(maxsize=None)
 def get_provider(name: str | None = None) -> DataProvider:
-    """Build a provider by name ("yahoo" or "synthetic").
+    """Build a provider by name: "synthetic", "yahoo" (personal use) or "fmp" (licensable).
 
     Defaults to the ``MONEY_PROVIDER`` environment variable, else "synthetic".
     """
@@ -26,4 +26,9 @@ def get_provider(name: str | None = None) -> DataProvider:
 
         cache = Path(os.environ.get("MONEY_CACHE_DIR", Path.home() / ".cache" / "money"))
         return YahooProvider(cache)
+    if name == "fmp":
+        from .fmp import FMPProvider
+
+        cache = Path(os.environ.get("MONEY_CACHE_DIR", Path.home() / ".cache" / "money"))
+        return FMPProvider(os.environ.get("FMP_API_KEY", ""), cache)
     raise ValueError(f"unknown data provider: {name!r}")
