@@ -361,3 +361,6 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-3); 
   .split[style] { grid-template-columns: minmax(0, 1fr) !important; }
   .results-first > :first-child { order: 2; }
 }
+
+.card.danger { border-color: rgba(230, 103, 103, 0.35); }
+.btn.danger-btn { background: var(--down); border-color: var(--down); color: #fff; }

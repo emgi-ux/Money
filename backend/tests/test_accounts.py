@@ -142,3 +142,47 @@ def test_bots_seed_and_rank(tmp_path, monkeypatch):
     assert len(board) == len(trading.BOTS)
     assert all(r["is_bot"] and r["trades"] > 0 for r in board)
     assert board[0]["total_return"] >= board[-1]["total_return"]
+
+
+def _reset_link_token() -> str:
+    from money.mailer import outbox
+
+    body = outbox[-1].get_content()
+    return body.split("token=")[1].split()[0]
+
+
+def test_password_reset_flow(client):
+    old_h, _ = signup(client, "resetme")
+    # Unknown emails get the same response and no email (no account enumeration).
+    from money.mailer import outbox
+
+    before = len(outbox)
+    assert client.post("/api/auth/forgot", json={"email": "nobody@example.com"}).json() == {"ok": True}
+    assert len(outbox) == before
+    assert client.post("/api/auth/forgot", json={"email": "RESETME@example.com"}).status_code == 200
+    token = _reset_link_token()
+    assert client.post("/api/auth/reset", json={"token": token, "password": "short"}).status_code == 400
+    r = client.post("/api/auth/reset", json={"token": token, "password": "brand-new-pass"})
+    assert r.status_code == 200 and r.json()["token"]
+    # Token is single-use; old sessions are revoked; new password works, old one doesn't.
+    assert client.post("/api/auth/reset", json={"token": token, "password": "another-pass"}).status_code == 400
+    assert client.get("/api/auth/me", headers=old_h).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "resetme@example.com", "password": "hunter22!"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "resetme@example.com", "password": "brand-new-pass"}).status_code == 200
+
+
+def test_delete_account(client):
+    lh, leader = signup(client, "leaver")
+    fh, _ = signup(client, "stayer")
+    client.patch("/api/auth/me", headers=lh, json={"is_public": True})
+    client.post("/api/paper/order", headers=lh, json={"ticker": "AAPL", "side": "buy", "qty": 5})
+    client.post(f"/api/traders/{leader['id']}/copy", headers=fh, json={"allocation": 5000})
+    assert client.request("DELETE", "/api/auth/me", headers=lh, json={"password": "wrong-pass"}).status_code == 403
+    assert client.request("DELETE", "/api/auth/me", headers=lh, json={"password": "hunter22!"}).status_code == 200
+    assert client.get("/api/auth/me", headers=lh).status_code == 401
+    assert client.get(f"/api/traders/{leader['id']}").status_code == 404
+    # The follower keeps their own positions; the copy link is gone.
+    p = client.get("/api/paper", headers=fh).json()
+    assert p["copying"] == [] and p["positions"][0]["ticker"] == "AAPL"
+    # The email can be registered again.
+    signup(client, "leaver")

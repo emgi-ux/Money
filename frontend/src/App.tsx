@@ -14,6 +14,7 @@ import { Pricing } from "./views/Pricing";
 import { Account } from "./views/Account";
 import { Trade } from "./views/Trade";
 import { Leaders, Trader } from "./views/Leaders";
+import { ResetPassword } from "./views/ResetPassword";
 
 const NAV = [
   { id: "screener", label: "Screener", icon: "M4 6h16M7 12h10M10 18h4" },
@@ -44,6 +45,8 @@ function Shell() {
   const [q, setQ] = useState("");
   const view = parts[0];
   const arg = parts[1];
+  // Navigating (links, back button, emailed reset links) dismisses any open sign-in dialog.
+  useEffect(() => { openAuth(null); }, [view, arg, openAuth]);
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault();
@@ -113,6 +116,7 @@ function Shell() {
           : view === "trade" ? <Trade />
           : view === "leaders" ? <Leaders />
           : view === "trader" && arg ? <Trader id={Number(arg)} key={arg} />
+          : view === "reset" ? <ResetPassword token={query.get("token")} />
           : <Screener />}
       </main>
       <nav className="tabbar mobile-only">

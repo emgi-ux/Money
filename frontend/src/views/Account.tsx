@@ -80,6 +80,50 @@ export function Account({ query }: { query: URLSearchParams }) {
       <div style={{ marginTop: 16 }}>
         <button className="btn" onClick={() => { signOut(); go("screener"); }}>Sign out</button>
       </div>
+      <DangerZone isPro={user.is_pro} onDeleted={() => { signOut(); go("screener"); }} />
     </>
+  );
+}
+
+function DangerZone({ isPro, onDeleted }: { isPro: boolean; onDeleted: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteMe(password);
+      onDeleted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card danger" style={{ marginTop: 24 }}>
+      <div className="card-head"><h2>Delete account</h2></div>
+      <div className="card-body">
+        <p className="hint" style={{ marginTop: 0 }}>
+          Permanently deletes your profile, paper portfolio, trade history and copy links.
+          {isPro && " Your subscription is cancelled immediately."} This can't be undone.
+        </p>
+        {!open ? (
+          <button className="btn" onClick={() => setOpen(true)}>Delete my account…</button>
+        ) : (
+          <div className="row" style={{ maxWidth: 480, flexWrap: "wrap" }}>
+            <input type="password" placeholder="Confirm with your password" autoComplete="current-password"
+              value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button className="btn danger-btn" style={{ flex: "none" }} disabled={busy || !password} onClick={remove}>
+              {busy ? "Deleting…" : "Permanently delete"}
+            </button>
+          </div>
+        )}
+        {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
+      </div>
+    </div>
   );
 }

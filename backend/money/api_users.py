@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, billing, trading
 from .data import get_provider
+from .db import db_path
 from .universe import resolve_universe
 
 router = APIRouter(prefix="/api")
@@ -107,6 +108,49 @@ def update_me(body: ProfileBody, user: dict = Depends(require_user)):
         raise HTTPException(400, str(e)) from e
 
 
+class ForgotBody(BaseModel):
+    email: str
+
+
+class ResetBody(BaseModel):
+    token: str
+    password: str
+
+
+class DeleteBody(BaseModel):
+    password: str
+
+
+@router.post("/auth/forgot")
+def forgot(body: ForgotBody, request: Request):
+    try:
+        auth.request_password_reset(body.email, _base_url(request))
+    except auth.AuthError as e:
+        raise HTTPException(429, str(e)) from e
+    # Same response whether or not the email exists.
+    return {"ok": True}
+
+
+@router.post("/auth/reset")
+def reset_password(body: ResetBody):
+    try:
+        return auth.reset_password(body.token, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/auth/me")
+def delete_me(body: DeleteBody, user: dict = Depends(require_user)):
+    if not auth.check_password(user["id"], body.password):
+        raise HTTPException(403, "Incorrect password")
+    try:
+        billing.cancel_subscription_now(user)
+    except billing.BillingError as e:
+        raise HTTPException(502, str(e)) from e
+    auth.delete_user(user["id"])
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------ billing
 class CheckoutBody(BaseModel):
     plan: str
@@ -182,10 +226,11 @@ BOARD_TTL = 60
 @router.get("/leaderboard")
 def leaderboard(sort: str = Query("total_return")):
     _seed_bots()
-    hit = _board_cache.get(sort)
+    key = f"{db_path()}|{sort}"
+    hit = _board_cache.get(key)
     if hit is None or time.time() - hit[0] > BOARD_TTL:
         hit = (time.time(), trading.leaderboard(get_provider(), sort))
-        _board_cache[sort] = hit
+        _board_cache[key] = hit
     return {"rows": hit[1]}
 
 

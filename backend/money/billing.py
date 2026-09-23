@@ -191,3 +191,18 @@ def _customer_id(user_id: int) -> str | None:
     with connect() as c:
         row = c.execute("SELECT stripe_customer_id FROM users WHERE id = ?", (user_id,)).fetchone()
     return row["stripe_customer_id"] if row else None
+
+
+def cancel_subscription_now(user: dict) -> None:
+    """Cancel any live Stripe subscription immediately (used on account deletion)."""
+    if billing_mode() != "stripe":
+        return
+    with connect() as c:
+        row = c.execute("SELECT stripe_subscription_id FROM users WHERE id = ?", (user["id"],)).fetchone()
+    sub_id = row["stripe_subscription_id"] if row else None
+    if sub_id:
+        try:
+            _stripe().Subscription.cancel(sub_id)
+        except Exception as e:  # already cancelled / missing: nothing left to bill
+            if "No such subscription" not in str(e) and "canceled" not in str(e):
+                raise BillingError(f"Could not cancel subscription: {e}") from e

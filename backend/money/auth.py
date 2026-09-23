@@ -164,3 +164,57 @@ def update_profile(user_id: int, display_name: str | None = None, bio: str | Non
             except sqlite3.IntegrityError as e:
                 raise AuthError("That display name is already taken") from e
     return get_user(user_id)
+
+
+# ------------------------------------------------------------ password reset
+RESET_MINUTES = 60
+
+
+def request_password_reset(email: str, base_url: str) -> None:
+    """Email a single-use reset link. Silent for unknown emails (no account enumeration)."""
+    from .mailer import send_email
+
+    email = email.strip().lower()
+    _check_rate(f"reset|{email}")
+    _failures[f"reset|{email}"].append(time.time())  # counts toward the throttle either way
+    with connect() as c:
+        row = c.execute("SELECT id FROM users WHERE email = ? AND is_bot = 0", (email,)).fetchone()
+        if not row:
+            return
+        token = secrets.token_urlsafe(32)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=RESET_MINUTES)
+        c.execute("INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+                  (_token_hash(token), row["id"], expires.isoformat()))
+    link = f"{base_url}/#/reset?token={token}"
+    send_email(email, "Reset your Money password",
+               f"Someone asked to reset the password for this account.\n\n"
+               f"Reset it here (valid for {RESET_MINUTES} minutes):\n{link}\n\n"
+               f"If this wasn't you, you can ignore this email.")
+
+
+def reset_password(token: str, new_password: str) -> dict:
+    """Consume a reset token, set the password, and sign out every other session."""
+    if len(new_password) < 8:
+        raise AuthError("Password must be at least 8 characters")
+    with connect() as c:
+        row = c.execute("SELECT * FROM password_resets WHERE token_hash = ?", (_token_hash(token),)).fetchone()
+        if (not row or row["used"]
+                or datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc)):
+            raise AuthError("This reset link is invalid or has expired")
+        c.execute("UPDATE password_resets SET used = 1 WHERE token_hash = ?", (row["token_hash"],))
+        c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(new_password), row["user_id"]))
+        c.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+        user_id = row["user_id"]
+    return {"token": create_session(user_id), "user": get_user(user_id)}
+
+
+def check_password(user_id: int, password: str) -> bool:
+    with connect() as c:
+        row = c.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    return bool(row) and verify_password(password, row["password_hash"])
+
+
+def delete_user(user_id: int) -> None:
+    """Permanently delete a user; trades, sessions and copy links cascade."""
+    with connect() as c:
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))

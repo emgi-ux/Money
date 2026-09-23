@@ -70,6 +70,10 @@ export const api = {
   me: () => call<{ user: User; billing: PlansResponse }>("/auth/me"),
   updateMe: (patch: { display_name?: string; bio?: string; is_public?: boolean }) =>
     call<{ user: User }>("/auth/me", patch, "PATCH"),
+  forgot: (email: string) => call<{ ok: boolean }>("/auth/forgot", { email }),
+  resetPassword: (token: string, password: string) =>
+    call<{ token: string; user: User }>("/auth/reset", { token, password }),
+  deleteMe: (password: string) => call<{ ok: boolean }>("/auth/me", { password }, "DELETE"),
   plans: () => call<PlansResponse>("/billing/plans"),
   checkout: (plan: string) => call<{ url: string }>("/billing/checkout", { plan }),
   portal: () => call<{ url: string }>("/billing/portal", {}),

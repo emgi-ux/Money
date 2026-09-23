@@ -25,7 +25,7 @@ installs on phones and desktops as a PWA.
 cd backend
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest                         # 44 tests, all offline
+pytest                         # 46 tests, all offline
 
 # Frontend (Node 20+)
 cd ../frontend
@@ -69,7 +69,10 @@ money risk AAPL=0.3,MSFT=0.3,JNJ=0.4
    PWA install and Stripe) and set `MONEY_PUBLIC_URL`. See `.env.example` for
    every setting.
 5. **Market data.** Set `MONEY_PROVIDER=fmp` and `FMP_API_KEY` (see below).
-6. **App stores (optional).** The PWA already installs from the browser on
+6. **Email.** Set the `SMTP_*` and `MAIL_FROM` settings so password-reset links
+   reach customers. Users can also delete their own account from the Account page,
+   which cancels any Stripe subscription immediately.
+7. **App stores (optional).** The PWA already installs from the browser on
    iOS, Android and desktop. To list in the App Store or Google Play, wrap
    `frontend/dist` with [Capacitor](https://capacitorjs.com). Apple and Google
    generally require their in-app purchase systems (15-30% fee) for digital
@@ -108,7 +111,7 @@ backend/money/
   screener.py     filters + ranking            analysis.py  DCF, F-Score, Altman Z, thesis
   backtest.py     walk-forward engine          daytrade.py  VWAP, ORB, pivots, signals, scanner
   portfolio.py    optimizers + shrinkage       risk.py      VaR/CVaR, risk contributions
-  auth.py         scrypt passwords, hashed bearer sessions, login throttling
+  auth.py         scrypt passwords, hashed sessions, throttling, password reset, deletion
   billing.py      Stripe checkout / portal / webhook, dev + off modes
   trading.py      paper accounts, leaderboard, proportional copy trading, strategy bots
   db.py           SQLite schema                api.py / api_users.py  FastAPI routes

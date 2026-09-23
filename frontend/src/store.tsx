@@ -15,7 +15,7 @@ function save(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
 }
 
-type AuthMode = "login" | "register" | null;
+type AuthMode = "login" | "register" | "forgot" | null;
 
 interface Store {
   meta: Meta | null;
