@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from ..universe import known_sector
-from .base import DataProvider, Fundamentals
+from .base import INTRADAY_INTERVALS, DataProvider, Fundamentals
 
 _START = pd.Timestamp("2012-01-03")
 _END = pd.Timestamp("2030-12-31")
@@ -157,7 +157,8 @@ def _full_history(ticker: str) -> pd.DataFrame:
     rets = base_alpha + alpha + beta * market.values + sectors[f.sector].values + eps
     close = 20.0 * np.exp(r.uniform(0, 2.5)) * np.exp(np.cumsum(rets))
 
-    gap = r.normal(0, 0.004, n)
+    # Overnight gaps: mostly small, with occasional news-driven jumps (fat tails).
+    gap = r.normal(0, 0.004, n) + (r.random(n) < 0.03) * r.normal(0, 0.035, n)
     open_ = np.empty(n)
     open_[0] = close[0]
     open_[1:] = close[:-1] * np.exp(gap[1:])
@@ -185,6 +186,93 @@ def _benchmark_history() -> pd.DataFrame:
     )
 
 
+@lru_cache(maxsize=4096)
+def _statements_for(ticker: str, as_of: pd.Timestamp) -> pd.DataFrame:
+    """Five fiscal years of statements consistent with the fundamentals snapshot."""
+    f = _fundamentals_for(ticker)
+    r = np.random.default_rng(_seed("stmt", ticker))
+    mcap = f.market_cap or 50e9
+    price = float(_full_history(ticker)["close"].loc[:as_of].iloc[-1])
+    shares_now = mcap / price
+    years = 5
+    fy_end = [pd.Timestamp(as_of.year - k - 1, 12, 31) for k in range(years)][::-1]
+
+    rev_now = mcap / (f.ps or 3.0)
+    g = f.revenue_growth if f.revenue_growth is not None else 0.05
+    growth = np.clip(r.normal(g, 0.05, years), -0.3, 0.6)
+    revenue = np.empty(years)
+    revenue[-1] = rev_now
+    for k in range(years - 2, -1, -1):
+        revenue[k] = revenue[k + 1] / (1 + growth[k + 1])
+
+    gm = np.clip((f.gross_margin or 0.4) + r.normal(0, 0.02, years), 0.02, 0.95)
+    om = np.clip((f.operating_margin or 0.15) + r.normal(0, 0.025, years), -0.3, 0.7)
+    nm = om * np.clip(r.normal(0.75, 0.05, years), 0.4, 0.95)
+    equity_now = mcap / (f.pb or 3.0)
+    equity = equity_now / np.cumprod(np.r_[1.0, 1 + np.clip(r.normal(0.06, 0.03, years - 1), -0.1, 0.3)])[::-1]
+    de = (f.debt_to_equity or 1.0) * np.exp(r.normal(0, 0.08, years))
+    total_debt = de * equity
+    total_assets = equity + total_debt + revenue * np.clip(r.normal(0.25, 0.05, years), 0.05, 0.6)
+    current_assets = total_assets * np.clip(r.normal(0.3, 0.03, years), 0.1, 0.6)
+    cr = (f.current_ratio or 1.4) * np.exp(r.normal(0, 0.06, years))
+    net_income = revenue * nm
+    ocf = net_income * np.clip(r.normal(1.2, 0.12, years), 0.6, 2.0)
+    capex = -revenue * np.clip(r.normal(0.05, 0.01, years), 0.005, 0.2)
+    fcf_target = (f.fcf_yield or 0.04) * mcap
+    # Scale the latest year's cash conversion so FCF agrees with the FCF yield.
+    ocf[-1] = fcf_target - capex[-1]
+    shares = shares_now * np.cumprod(np.r_[1.0, np.exp(r.normal(0.005, 0.01, years - 1))])[::-1]
+    return pd.DataFrame({
+        "revenue": revenue,
+        "gross_profit": revenue * gm,
+        "operating_income": revenue * om,
+        "net_income": net_income,
+        "total_assets": total_assets,
+        "total_liabilities": total_assets - equity,
+        "current_assets": current_assets,
+        "current_liabilities": current_assets / cr,
+        "long_term_debt": total_debt * 0.85,
+        "total_debt": total_debt,
+        "cash": current_assets * 0.35,
+        "equity": equity,
+        "retained_earnings": equity * np.clip(r.normal(0.7, 0.2), -0.5, 1.5),
+        "shares": shares,
+        "operating_cash_flow": ocf,
+        "capex": capex,
+        "free_cash_flow": ocf + capex,
+    }, index=pd.DatetimeIndex(fy_end, name="fiscal_year_end"))
+
+
+def _intraday_session(ticker: str, day: pd.Timestamp, bar: pd.Series, minutes: int) -> pd.DataFrame:
+    """Minute path from the day's open to close via a Brownian bridge, then resampled."""
+    r = np.random.default_rng(_seed("intraday", ticker, day.strftime("%Y%m%d")))
+    n = 390
+    o, c = float(bar["open"]), float(bar["close"])
+    day_range = max(float(bar["high"]) - float(bar["low"]), 1e-6)
+    steps = r.standard_normal(n) * day_range / np.sqrt(n) * 0.9
+    walk = np.cumsum(steps)
+    t = np.arange(1, n + 1) / n
+    path = o + (c - o) * t + walk - t * walk[-1]
+    idx = pd.date_range(day + pd.Timedelta(hours=9, minutes=30), periods=n, freq="1min")
+    px = pd.Series(path, index=idx)
+    prev = px.shift(1).fillna(o)
+    jitter = np.abs(r.normal(0, day_range * 0.01, (2, n)))
+    df = pd.DataFrame({
+        "open": prev.values, "close": px.values,
+        "high": np.maximum(prev.values, px.values) + jitter[0],
+        "low": np.minimum(prev.values, px.values) - jitter[1],
+    }, index=idx)
+    u = np.linspace(-1, 1, n)
+    profile = 0.4 + 1.6 * u**2          # U-shaped intraday volume
+    df["volume"] = np.round(float(bar["volume"]) * profile / profile.sum()
+                            * np.exp(r.normal(0, 0.3, n)))
+    if minutes == 1:
+        return df
+    agg = df.resample(f"{minutes}min", origin="start").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+    return agg.dropna()
+
+
 class SyntheticProvider(DataProvider):
     name = "synthetic"
 
@@ -203,3 +291,14 @@ class SyntheticProvider(DataProvider):
 
     def fundamentals(self, tickers: list[str]) -> dict[str, Fundamentals]:
         return {t: _fundamentals_for(t) for t in tickers if t != self.benchmark}
+
+    def statements(self, ticker: str) -> pd.DataFrame:
+        if ticker == self.benchmark:
+            return pd.DataFrame()
+        return _statements_for(ticker, self.as_of.normalize()).copy()
+
+    def intraday(self, ticker: str, interval: str = "5m", days: int = 5) -> pd.DataFrame:
+        minutes = INTRADAY_INTERVALS[interval]
+        hist = _benchmark_history() if ticker == self.benchmark else _full_history(ticker)
+        sessions = hist.loc[: self.as_of].tail(days)
+        return pd.concat([_intraday_session(ticker, d, row, minutes) for d, row in sessions.iterrows()])

@@ -156,6 +156,70 @@ class YahooProvider(DataProvider):
             beta=_num(info.get("beta")),
         )
 
+    # --------------------------------------------------------------- statements
+    _STATEMENT_ROWS = {
+        "revenue": ["Total Revenue", "Operating Revenue"],
+        "gross_profit": ["Gross Profit"],
+        "operating_income": ["Operating Income", "EBIT"],
+        "net_income": ["Net Income", "Net Income Common Stockholders"],
+        "total_assets": ["Total Assets"],
+        "total_liabilities": ["Total Liabilities Net Minority Interest"],
+        "current_assets": ["Current Assets"],
+        "current_liabilities": ["Current Liabilities"],
+        "long_term_debt": ["Long Term Debt"],
+        "total_debt": ["Total Debt"],
+        "cash": ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
+        "equity": ["Stockholders Equity", "Common Stock Equity"],
+        "retained_earnings": ["Retained Earnings"],
+        "shares": ["Ordinary Shares Number", "Share Issued"],
+        "operating_cash_flow": ["Operating Cash Flow"],
+        "capex": ["Capital Expenditure"],
+        "free_cash_flow": ["Free Cash Flow"],
+    }
+
+    def statements(self, ticker: str) -> pd.DataFrame:
+        p = self.cache_dir / "fundamentals" / f"{ticker}.statements.pkl"
+        if p.exists() and time.time() - p.stat().st_mtime < FUNDAMENTALS_TTL:
+            return pd.read_pickle(p)
+        import yfinance as yf
+
+        try:
+            t = yf.Ticker(ticker)
+            raw = pd.concat([t.income_stmt, t.balance_sheet, t.cashflow])
+        except Exception as e:
+            log.warning("statements failed for %s: %s", ticker, e)
+            return pd.DataFrame()
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+        raw = raw[~raw.index.duplicated()]
+        out = {}
+        for col, labels in self._STATEMENT_ROWS.items():
+            for label in labels:
+                if label in raw.index:
+                    out[col] = pd.to_numeric(raw.loc[label], errors="coerce")
+                    break
+        df = pd.DataFrame(out)
+        df.index = pd.DatetimeIndex(df.index, name="fiscal_year_end")
+        df = df.sort_index().dropna(how="all")
+        df.to_pickle(p)
+        return df
+
+    # ----------------------------------------------------------------- intraday
+    def intraday(self, ticker: str, interval: str = "5m", days: int = 5) -> pd.DataFrame:
+        import yfinance as yf
+
+        # Yahoo limits: 1m bars for ~7 days, other intraday intervals for ~60 days.
+        days = min(days, 7 if interval == "1m" else 59)
+        raw = yf.download(ticker, period=f"{days}d", interval=interval, auto_adjust=True,
+                          progress=False, prepost=False)
+        df = self._extract(raw, ticker, single=True)
+        if df is None:
+            return pd.DataFrame()
+        idx = pd.DatetimeIndex(raw.index)
+        if idx.tz is not None:
+            df.index = idx.tz_convert("America/New_York").tz_localize(None)
+        return df
+
     def fundamentals(self, tickers: list[str]) -> dict[str, Fundamentals]:
         with ThreadPoolExecutor(max_workers=8) as pool:
             infos = list(pool.map(self._fetch_info, tickers))

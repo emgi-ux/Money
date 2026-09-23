@@ -167,3 +167,55 @@ def test_risk_contributions_sum_to_one(provider):
     assert sum(p["risk_contribution"] for p in r["positions"]) == pytest.approx(1)
     assert sum(p["weight"] for p in r["positions"]) == pytest.approx(1)
     assert r["summary"]["volatility"] > 0
+
+
+# ---------------------------------------------------------- deep analysis
+def test_dcf_constant_growth_equals_gordon():
+    from money.analysis import dcf_value
+
+    v = dcf_value(100.0, growth=0.03, rate=0.09, terminal=0.03)
+    assert v["equity_value"] == pytest.approx(100 * 1.03 / (0.09 - 0.03), rel=1e-9)
+
+
+def test_deep_analysis_sections(provider):
+    from money.analysis import deep_analysis
+
+    table = run_screen(provider, UNIVERSE, as_of=AS_OF).table
+    profile = table.loc["MSFT"].to_dict()
+    a = deep_analysis(provider, "MSFT", profile, table[table["sector"] == profile["sector"]], as_of=AS_OF)
+    assert a["valuation"]["available"]
+    s = a["valuation"]["scenarios"]
+    assert s["bear"]["fair_value"] < s["base"]["fair_value"] < s["bull"]["fair_value"]
+    assert 0 <= a["piotroski"]["score"] <= 9
+    assert a["altman"]["zone"] in ("Safe", "Grey", "Distress")
+    assert a["thesis"]["rating"] and len(a["trends"]["years"]) == 5
+    assert len(a["risk"]["seasonality"]) == 12
+
+
+def test_altman_skips_financials(provider):
+    from money.analysis import altman_z
+
+    assert not altman_z(provider.statements("JPM"), 1e11, "Financials")["available"]
+
+
+# ------------------------------------------------------------ day trading
+def test_vwap_matches_definition():
+    from money.daytrade import vwap
+
+    idx = pd.date_range("2026-01-05 09:30", periods=3, freq="5min")
+    df = pd.DataFrame({"high": [11, 12, 13], "low": [9, 10, 11], "close": [10, 11, 12],
+                       "volume": [100, 300, 100]}, index=idx)
+    vw, _ = vwap(df)
+    assert vw.iloc[-1] == pytest.approx((10 * 100 + 11 * 300 + 12 * 100) / 500)
+
+
+def test_intraday_view_and_scanner(provider):
+    from money.daytrade import intraday_view, scan
+
+    v = intraday_view(provider, "AAPL", "5m", 3, as_of=AS_OF)
+    assert len(v["candles"]) == 3 * 78
+    lv = v["levels"]
+    assert lv["opening_range_low"] <= lv["opening_range_high"]
+    assert lv["lod"] <= v["summary"]["price"] <= lv["hod"]
+    rows = scan(provider, UNIVERSE[:20], as_of=AS_OF)
+    assert len(rows) == 20 and all("gap" in r for r in rows)

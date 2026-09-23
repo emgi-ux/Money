@@ -52,6 +52,16 @@ class Fundamentals:
         return d
 
 
+STATEMENT_COLUMNS = [
+    "revenue", "gross_profit", "operating_income", "net_income", "total_assets",
+    "total_liabilities", "current_assets", "current_liabilities", "long_term_debt",
+    "total_debt", "cash", "equity", "retained_earnings", "shares",
+    "operating_cash_flow", "capex", "free_cash_flow",
+]
+
+INTRADAY_INTERVALS = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "60m": 60}
+
+
 class DataProvider(ABC):
     """Abstract market data source."""
 
@@ -64,6 +74,20 @@ class DataProvider(ABC):
     @abstractmethod
     def fundamentals(self, tickers: list[str]) -> dict[str, Fundamentals]:
         """Return {ticker: Fundamentals} for the tickers that have data."""
+
+    def statements(self, ticker: str) -> pd.DataFrame:
+        """Annual financial statements, one row per fiscal year (oldest first).
+
+        Columns (any may be missing): revenue, gross_profit, operating_income,
+        net_income, total_assets, total_liabilities, current_assets,
+        current_liabilities, long_term_debt, total_debt, cash, equity,
+        retained_earnings, shares, operating_cash_flow, capex, free_cash_flow.
+        """
+        return pd.DataFrame()
+
+    def intraday(self, ticker: str, interval: str = "5m", days: int = 5) -> pd.DataFrame:
+        """Intraday OHLCV bars (exchange-local timestamps) for the last ``days`` sessions."""
+        return pd.DataFrame()
 
     def close_matrix(self, tickers: list[str], start: date, end: date) -> pd.DataFrame:
         """Adjusted close prices as a (date x ticker) matrix."""

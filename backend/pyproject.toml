@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=1.26",
     "pydantic>=2.5",
     "yfinance>=0.2.40",
+    "stripe>=10",
 ]
 
 [project.optional-dependencies]

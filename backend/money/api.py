@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -10,16 +11,20 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .analysis import deep_analysis
 from .analytics import series_points
+from .api_users import require_pro, router as users_router
+from .billing import paywall_enabled
 from .backtest import BacktestConfig, run_backtest
 from .data import get_provider
+from .daytrade import intraday_view, scan
 from .factors import FACTORS, PRICE_FACTORS, technicals
 from .portfolio import METHODS, construct
 from .risk import analyze_portfolio
@@ -28,7 +33,10 @@ from .scoring import DEFAULT_WEIGHTS, ScoringConfig
 from .universe import DEFAULT_BENCHMARK, UNIVERSES, resolve_universe
 
 app = FastAPI(title="Money", version=__version__)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_origins = [o for o in os.environ.get("MONEY_CORS_ORIGINS", "").split(",") if o] or ["*"]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
+app.include_router(users_router)
+PRO = [Depends(require_pro)]
 
 
 def clean(obj: Any) -> Any:
@@ -126,6 +134,7 @@ def meta():
         "metrics": metric_catalog(),
         "weighting_methods": METHODS,
         "sectors": sorted(set(UNIVERSES["us_large_cap"].values())),
+        "paywall": paywall_enabled(),
     }
 
 
@@ -200,6 +209,37 @@ def stock(ticker: str, years: float = Query(2.0, gt=0, le=20)):
     })
 
 
+@app.get("/api/analysis/{ticker}", dependencies=PRO)
+def analysis(ticker: str):
+    ticker = ticker.upper()
+    universe = resolve_universe(None)
+    if ticker not in universe:
+        universe = universe + [ticker]
+    table = _screen(ScreenRequest(universe=universe)).table
+    profile = table.loc[ticker].to_dict() if ticker in table.index else {}
+    sector = profile.get("sector")
+    peers = table[table["sector"] == sector] if sector else table.iloc[0:0]
+    try:
+        return clean(cached(f"analysis:{ticker}",
+                            lambda: deep_analysis(provider(), ticker, profile, peers)))
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.get("/api/daytrade/{ticker}", dependencies=PRO)
+def daytrade(ticker: str, interval: str = "5m", days: int = Query(5, ge=1, le=30)):
+    try:
+        return clean(intraday_view(provider(), ticker.upper(), interval, days))
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.get("/api/scanner", dependencies=PRO)
+def scanner(universe: str | None = None):
+    rows = cached(f"scan:{universe}", lambda: scan(provider(), resolve_universe(universe)))
+    return clean({"rows": rows})
+
+
 def _peers(table: pd.DataFrame, sector: str | None, ticker: str) -> list[dict]:
     if not sector:
         return []
@@ -209,7 +249,7 @@ def _peers(table: pd.DataFrame, sector: str | None, ticker: str) -> list[dict]:
              "is_self": t == ticker} for t in peers.index]
 
 
-@app.post("/api/backtest")
+@app.post("/api/backtest", dependencies=PRO)
 def backtest(req: BacktestRequest):
     cfg = BacktestConfig(
         start=req.start, end=req.end, weights=req.weights, top_n=req.top_n,
@@ -224,7 +264,7 @@ def backtest(req: BacktestRequest):
     return clean(res.to_dict())
 
 
-@app.post("/api/portfolio/analyze")
+@app.post("/api/portfolio/analyze", dependencies=PRO)
 def portfolio_analyze(req: Holdings):
     weights = {k.upper(): v for k, v in req.weights.items()}
     try:
@@ -233,7 +273,7 @@ def portfolio_analyze(req: Holdings):
         raise HTTPException(400, str(e)) from e
 
 
-@app.post("/api/portfolio/construct")
+@app.post("/api/portfolio/construct", dependencies=PRO)
 def portfolio_construct(req: ConstructRequest):
     p = provider()
     scores = None
