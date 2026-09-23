@@ -434,6 +434,14 @@ def _backfill_bot(provider: DataProvider, uid: int, tickers: list[str], weights:
                                 propagate=False)
 
 
+def bots_ready() -> bool:
+    """True once strategy-bot backfill has finished (or was never needed)."""
+    if os.environ.get("MONEY_SEED_BOTS", "1") == "0":
+        return True
+    with connect() as c:
+        return c.execute("SELECT 1 FROM meta WHERE key = 'bots_seeded'").fetchone() is not None
+
+
 def _equity_at(provider: DataProvider, c, user_id: int, on: date) -> float:
     cash = c.execute("SELECT cash FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()["cash"]
     return cash + sum(q * latest_price(provider, t, on) for t, q in _holdings(c, user_id).items())

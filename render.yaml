@@ -1,0 +1,22 @@
+# One-click demo deploy: https://render.com/deploy?repo=https://github.com/emgi-ux/Money
+# Free plan: the service sleeps when idle and its disk is wiped on each deploy,
+# so accounts and paper trades reset. Use a paid plan + persistent disk for production.
+services:
+  - type: web
+    name: money
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/meta
+    envVars:
+      - key: PORT
+        value: "8000"
+      # Demo market data; switch to fmp (with FMP_API_KEY) for real data.
+      - key: MONEY_PROVIDER
+        value: synthetic
+      # Paywall on with simulated checkout, so the Pricing/Pro flow can be tried
+      # without payment. Replace with Stripe keys before charging real customers.
+      - key: MONEY_BILLING
+        value: dev
+      - key: MONEY_SEED_BOTS
+        value: "1"

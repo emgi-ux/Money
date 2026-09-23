@@ -18,6 +18,17 @@ installs on phones and desktops as a PWA.
 | **Subscriptions** | Stripe Checkout (weekly and monthly, optional free trial), the customer Billing Portal, and a signed, idempotent webhook. Pro features are enforced server-side (HTTP 402). |
 | **App** | Installable PWA with offline shell, home-screen icons and a mobile tab bar. Dark and light themes. |
 
+## Try it online (one click)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/emgi-ux/Money)
+
+Sign in to Render with GitHub, click **Deploy Blueprint**, and after a few
+minutes you get a public URL. The demo uses simulated market data and a
+simulated checkout (`MONEY_BILLING=dev`), so you can try the Pro features without
+paying. On Render's free plan the site sleeps when idle (the first visit takes
+about 30 seconds) and its data resets on every deploy. For real customers, see
+*Going live* below.
+
 ## Quick start
 
 ```bash

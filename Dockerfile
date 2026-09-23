@@ -17,4 +17,5 @@ RUN pip install --no-cache-dir -e ./backend
 COPY --from=web /app/frontend/dist ./frontend/dist
 VOLUME ["/data"]
 EXPOSE 8000
-CMD ["uvicorn", "money.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Hosts such as Render, Railway and Fly inject $PORT; default to 8000 elsewhere.
+CMD ["sh", "-c", "exec uvicorn money.api:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips '*'"]

@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from . import auth, billing, trading
 from .data import get_provider
 from .db import db_path
-from .universe import resolve_universe
 
 router = APIRouter(prefix="/api")
 
@@ -196,10 +195,6 @@ class CopyBody(BaseModel):
     allocation: float = Field(gt=0)
 
 
-def _seed_bots():
-    trading.seed_bots(get_provider(), resolve_universe(None))
-
-
 @router.get("/paper")
 def paper(user: dict = Depends(require_user)):
     return trading.portfolio(get_provider(), user["id"])
@@ -225,12 +220,13 @@ BOARD_TTL = 60
 
 @router.get("/leaderboard")
 def leaderboard(sort: str = Query("total_return")):
-    _seed_bots()
+    # Bots are backfilled in the background at startup; never block a request on it.
     key = f"{db_path()}|{sort}"
     hit = _board_cache.get(key)
     if hit is None or time.time() - hit[0] > BOARD_TTL:
         hit = (time.time(), trading.leaderboard(get_provider(), sort))
-        _board_cache[key] = hit
+        if trading.bots_ready():  # don't cache a half-seeded board
+            _board_cache[key] = hit
     return {"rows": hit[1]}
 
 
