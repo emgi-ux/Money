@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import { TimeChart, type SeriesSpec } from "../components/TimeChart";
 import { Card, Seg, Stat, divergingBg, textOn } from "../components/bits";
+import { Gate } from "../components/Gate";
 import { FACTOR_LABEL, num, pct, signedPct, tone } from "../format";
 import { go, useStore } from "../store";
 import type { BacktestRequest, BacktestResponse, Stats } from "../types";
@@ -40,7 +41,7 @@ export function Backtest() {
   });
   const [res, setRes] = useState<BacktestResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [log, setLog] = useState(true);
   const [holdIdx, setHoldIdx] = useState(-1);
 
@@ -48,7 +49,7 @@ export function Backtest() {
     setLoading(true);
     api.backtest(req)
       .then((r) => { setRes(r); setError(null); setHoldIdx(r.holdings.length - 1); })
-      .catch((e) => setError(e.message))
+      .catch(setError)
       .finally(() => setLoading(false));
   };
 
@@ -123,7 +124,7 @@ export function Backtest() {
         </div>
 
         <div className={`stack ${loading && res ? "loading" : ""}`}>
-          {error && <div className="error">{error}</div>}
+          {error != null && <Gate error={error} feature="The strategy backtester" />}
           {!res && !error && (
             <Card><div className="empty">Configure a strategy and run the backtest.</div></Card>
           )}

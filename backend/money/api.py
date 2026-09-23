@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
+import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,11 +35,27 @@ from .screener import Filters, metric_catalog, run_screen
 from .scoring import DEFAULT_WEIGHTS, ScoringConfig
 from .universe import DEFAULT_BENCHMARK, UNIVERSES, resolve_universe
 
-app = FastAPI(title="Money", version=__version__)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Backfill the public strategy bots in the background so the leaderboard is never empty."""
+    from .trading import seed_bots
+
+    def run():
+        try:
+            seed_bots(get_provider(), resolve_universe(None))
+        except Exception:  # never block startup on demo content
+            logging.getLogger(__name__).exception("bot seeding failed")
+
+    threading.Thread(target=run, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Money", version=__version__, lifespan=lifespan)
 _origins = [o for o in os.environ.get("MONEY_CORS_ORIGINS", "").split(",") if o] or ["*"]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
 app.include_router(users_router)
 PRO = [Depends(require_pro)]
+
 
 
 def clean(obj: Any) -> Any:
@@ -299,7 +318,12 @@ _dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if _dist.exists():
     app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
 
+    _dist_root = _dist.resolve()
+
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
-        f = _dist / path
-        return FileResponse(f if path and f.is_file() else _dist / "index.html")
+        f = (_dist_root / path).resolve()
+        # Only serve files inside dist/ (blocks ../ traversal); anything else gets the SPA shell.
+        if path and f.is_file() and f.is_relative_to(_dist_root):
+            return FileResponse(f)
+        return FileResponse(_dist_root / "index.html")

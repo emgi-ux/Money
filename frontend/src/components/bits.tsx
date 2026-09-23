@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { FACTOR_LABEL, gradeClass, num } from "../format";
 
 export function Card({ title, sub, right, children, pad = true, className = "" }: {
@@ -98,4 +98,15 @@ export function divergingBg(v: number, max: number): string {
 
 export function textOn(v: number, max: number): string {
   return Math.abs(v / max) > 0.55 ? "#fff" : "var(--text)";
+}
+
+/** Two-column key/value list. */
+export function KV({ rows, style }: { rows: [ReactNode, ReactNode][]; style?: CSSProperties }) {
+  return (
+    <div className="kv" style={style}>
+      {rows.map(([k, v], i) => (
+        <Fragment key={i}><span className="k">{k}</span><span className="v">{v}</span></Fragment>
+      ))}
+    </div>
+  );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { TimeChart, type SeriesSpec } from "../components/TimeChart";
 import { Card, Stat, divergingBg, textOn } from "../components/bits";
+import { Gate } from "../components/Gate";
 import { num, pct, signedPct, tone } from "../format";
 import { go, useStore } from "../store";
 import type { RiskResponse } from "../types";
@@ -19,7 +20,7 @@ export function Portfolio() {
   const [maxW, setMaxW] = useState(15);
   const [lookback, setLookback] = useState(365);
   const [res, setRes] = useState<RiskResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const weights = useMemo(() => {
@@ -39,7 +40,7 @@ export function Portfolio() {
     setDraft(w);
     api.analyze(w, lookback)
       .then((r) => { setRes(r); setError(null); })
-      .catch((e) => setError(e.message))
+      .catch(setError)
       .finally(() => setBusy(false));
   };
 
@@ -54,7 +55,7 @@ export function Portfolio() {
       : { tickers: Object.keys(weights), method, max_weight: maxW / 100 };
     api.construct(body)
       .then((r) => { setRows(toRows(r.weights)); analyze(r.weights); })
-      .catch((e) => { setError(e.message); setBusy(false); });
+      .catch((e) => { setError(e); setBusy(false); });
   };
 
   const eqSeries: SeriesSpec[] = useMemo(() => res ? [
@@ -116,7 +117,7 @@ export function Portfolio() {
         </div>
 
         <div className={`stack ${busy && res ? "loading" : ""}`}>
-          {error && <div className="error">{error}</div>}
+          {error != null && <Gate error={error} feature="Portfolio risk analytics" />}
           {!res && !error && <Card><div className="empty">Add holdings and analyze.</div></Card>}
           {res && s && (
             <>

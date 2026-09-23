@@ -243,7 +243,8 @@ def financial_trends(st: pd.DataFrame) -> dict:
     }
     n = len(st) - 1
     cagr = {}
-    for k in ("revenue", "net_income", "free_cash_flow", "shares"):
+    for k in ("revenue", "gross_profit", "operating_income", "net_income", "free_cash_flow",
+              "operating_cash_flow", "total_debt", "cash", "equity", "shares"):
         v = rows[k]
         cagr[k] = _cagr(v[0], v[-1], n) if n > 0 and v[0] is not None and v[-1] is not None else None
     return {"years": years, "rows": rows, "cagr": cagr}

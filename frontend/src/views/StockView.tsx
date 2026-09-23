@@ -67,6 +67,8 @@ export function StockView({ ticker }: { ticker: string }) {
         <button className={`btn sm ${onWatch ? "primary" : ""}`} onClick={() => toggleWatch(ticker)}>
           {onWatch ? "★ Watching" : "☆ Watch"}
         </button>
+        <a className="btn sm primary" href={`#/analysis/${ticker}`}>Deep analysis →</a>
+        <a className="btn sm" href={`#/daytrade/${ticker}`}>Day trade →</a>
       </div>
 
       <div className="stack">

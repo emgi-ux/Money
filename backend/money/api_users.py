@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -174,10 +175,18 @@ def reset(user: dict = Depends(require_user)):
     return {"ok": True}
 
 
+_board_cache: dict[str, tuple[float, list]] = {}
+BOARD_TTL = 60
+
+
 @router.get("/leaderboard")
 def leaderboard(sort: str = Query("total_return")):
     _seed_bots()
-    return {"rows": trading.leaderboard(get_provider(), sort)}
+    hit = _board_cache.get(sort)
+    if hit is None or time.time() - hit[0] > BOARD_TTL:
+        hit = (time.time(), trading.leaderboard(get_provider(), sort))
+        _board_cache[sort] = hit
+    return {"rows": hit[1]}
 
 
 @router.get("/traders/{trader_id}")

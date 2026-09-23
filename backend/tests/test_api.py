@@ -67,3 +67,14 @@ def test_portfolio(client):
 def test_unknown_ticker_risk(client):
     r = client.post("/api/portfolio/analyze", json={"weights": {}})
     assert r.status_code == 400
+
+
+def test_spa_blocks_path_traversal(client):
+    from money import api
+
+    if not api._dist.exists():
+        pytest.skip("frontend not built")
+    for probe in ("/..%2f..%2fpyproject.toml", "/%2e%2e/%2e%2e/backend/pyproject.toml"):
+        r = client.get(probe)
+        assert "[project]" not in r.text
+    assert client.get("/manifest.webmanifest").status_code == 200

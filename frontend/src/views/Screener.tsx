@@ -114,7 +114,7 @@ export function Screener() {
           {data ? `${rows.length} of ${data.universe_size} stocks · as of ${data.as_of}` : "Loading…"}
         </span>
       </div>
-      <div className="split">
+      <div className="split results-first">
         <div className="stack sticky">
           <Card title="Factor weights" right={<span className="hint">{totalW ? "" : "set a weight"}</span>}>
             <div className="chips" style={{ marginBottom: 14 }}>

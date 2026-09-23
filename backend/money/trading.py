@@ -13,6 +13,7 @@ broker-dealer / investment adviser and is intentionally out of scope.
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import threading
@@ -24,6 +25,8 @@ import pandas as pd
 from .analytics import TRADING_DAYS, series_points
 from .data.base import DataProvider
 from .db import connect
+
+log = logging.getLogger(__name__)
 
 STARTING_CASH = 100_000.0
 MIN_QTY = 1e-4
@@ -361,8 +364,6 @@ def seed_bots(provider: DataProvider, tickers: list[str], months: int = 6) -> in
     if os.environ.get("MONEY_SEED_BOTS", "1") == "0":
         return 0
     from .auth import hash_password
-    from .scoring import ScoringConfig
-    from .screener import run_screen
 
     with _seed_lock:
         with connect() as c:
@@ -380,41 +381,57 @@ def seed_bots(provider: DataProvider, tickers: list[str], months: int = 6) -> in
                        VALUES (?, ?, ?, ?, 1, 1)""",
                     (f"{name.lower()}@bots.invalid", hash_password(secrets.token_urlsafe(24)), name, bio))
                 uid = cur.lastrowid
-            ensure_account(uid, created_at=month_starts[0].strftime("%Y-%m-%dT16:00:00+00:00"))
-            for d in month_starts:
-                res = run_screen(provider, tickers, ScoringConfig(weights=weights), as_of=d.date())
-                picks = list(res.table.dropna(subset=["composite"]).index[:top_n])
-                ts = d.strftime("%Y-%m-%dT16:00:00+00:00")
-                prices = {t: latest_price(provider, t, d.date()) for t in set(picks)}
+            try:
+                _backfill_bot(provider, uid, tickers, weights, top_n, month_starts)
+            except Exception:
+                log.exception("seeding bot %s failed", name)
                 with connect() as c:
-                    held = _holdings(c, uid)
-                for t, q in held.items():
-                    if t not in picks:
-                        place_order(provider, uid, t, "sell", q, price=latest_price(provider, t, d.date()),
-                                    ts=ts, source="bot", propagate=False)
-                with connect() as c:
-                    equity = _equity_at(provider, c, uid, d.date())
-                    held = _holdings(c, uid)
-                target = equity / len(picks) if picks else 0
-                # Trim overweights first to free cash, then top up.
-                for t in picks:
-                    diff = target / prices[t] - held.get(t, 0.0)
-                    if diff < -MIN_QTY:
-                        place_order(provider, uid, t, "sell", -diff, price=prices[t], ts=ts, source="bot",
-                                    propagate=False)
-                for t in picks:
-                    diff = target / prices[t] - held.get(t, 0.0)
-                    if diff > MIN_QTY:
-                        with connect() as c:
-                            cash = c.execute("SELECT cash FROM paper_accounts WHERE user_id = ?", (uid,)).fetchone()["cash"]
-                        qty = min(diff, cash / prices[t] * 0.9999)
-                        if qty > MIN_QTY:
-                            place_order(provider, uid, t, "buy", qty, price=prices[t], ts=ts, source="bot",
-                                        propagate=False)
+                    c.execute("DELETE FROM users WHERE id = ?", (uid,))
+                continue
             created += 1
         with connect() as c:
             c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('bots_seeded', ?)", (_now(),))
         return created
+
+
+def _backfill_bot(provider: DataProvider, uid: int, tickers: list[str], weights: dict, top_n: int,
+                  month_starts: pd.DatetimeIndex) -> None:
+    """Replay a monthly-rebalanced, equal-weight factor portfolio for a bot."""
+    from .scoring import ScoringConfig
+    from .screener import run_screen
+
+    ensure_account(uid, created_at=month_starts[0].strftime("%Y-%m-%dT16:00:00+00:00"))
+    for d in month_starts:
+        res = run_screen(provider, tickers, ScoringConfig(weights=weights), as_of=d.date())
+        picks = list(res.table.dropna(subset=["composite"]).index[:top_n])
+        ts = d.strftime("%Y-%m-%dT16:00:00+00:00")
+        prices = {t: latest_price(provider, t, d.date()) for t in set(picks)}
+        with connect() as c:
+            held = _holdings(c, uid)
+        for t, q in held.items():
+            if t not in picks:
+                place_order(provider, uid, t, "sell", q, price=latest_price(provider, t, d.date()),
+                            ts=ts, source="bot", propagate=False)
+        with connect() as c:
+            equity = _equity_at(provider, c, uid, d.date())
+            held = _holdings(c, uid)
+        target = equity / len(picks) if picks else 0
+        # Trim overweights first to free cash, then top up.
+        for t in picks:
+            diff = target / prices[t] - held.get(t, 0.0)
+            if diff < -MIN_QTY:
+                place_order(provider, uid, t, "sell", -diff, price=prices[t], ts=ts, source="bot",
+                            propagate=False)
+        for t in picks:
+            diff = target / prices[t] - held.get(t, 0.0)
+            if diff > MIN_QTY:
+                with connect() as c:
+                    cash = c.execute("SELECT cash FROM paper_accounts WHERE user_id = ?", (uid,)).fetchone()["cash"]
+                # Floor to the 4-dp share precision so rounding never exceeds cash.
+                qty = np.floor(min(diff, cash / prices[t]) * 1e4) / 1e4
+                if qty > MIN_QTY:
+                    place_order(provider, uid, t, "buy", qty, price=prices[t], ts=ts, source="bot",
+                                propagate=False)
 
 
 def _equity_at(provider: DataProvider, c, user_id: int, on: date) -> float:
